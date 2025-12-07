@@ -1,0 +1,635 @@
+openapi: 3.0.3
+info:
+  title: MobileNotes API
+  description: |
+    REST API för att hantera anteckningar i MobileNotes-applikationen.
+    
+    ## Funktioner
+    - Hämta alla anteckningar för en användare
+    - Hämta en specifik anteckning
+    - Skapa nya anteckningar med olika typer av innehåll
+    - Uppdatera befintliga anteckningar
+    - Radera anteckningar
+    - **Kopiera listor** (värdekopiering)
+    - **Referera listor** (levande referenser)
+    - Expandera referenser för att se aktuellt innehåll
+    
+    ## Innehållstyper
+    - **NoteLine** - Textrad i en anteckning
+    - **NoteReference** - Referens till en annan anteckning (levande länk)
+    - **Note** - Fullständig anteckning (kan nästlas)
+    
+    ## Säkerhet
+    Alla endpoints validerar användar-ID för att säkerställa att användare endast kan komma åt sina egna anteckningar.
+  version: 1.0.0
+  contact:
+    name: MobileNotes Support
+    email: support@mobilenotes.se
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8080
+    description: Lokal utvecklingsserver
+  - url: http://localhost:8080/api
+    description: API med prefix
+
+tags:
+  - name: Notes
+    description: Grundläggande operationer för anteckningar
+  - name: Advanced Operations
+    description: Avancerade operationer - kopiera och referera listor
+  - name: Health
+    description: Hälsokontroller
+
+paths:
+  /:
+    get:
+      summary: Hälsokontroll
+      description: Returnerar en enkel hälsokontrollsmeddelande
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Servern är aktiv
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Ktor: Hello, Kotlin/JVM!"
+
+  /users/{userId}/notes:
+    get:
+      summary: Hämta alla anteckningar för en användare
+      description: Returnerar en lista med alla anteckningar för den specificerade användaren, sorterade efter senaste ändring (nyaste först)
+      tags:
+        - Notes
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          description: Användarens unika ID
+          schema:
+            type: string
+            example: "user1"
+      responses:
+        '200':
+          description: Lista med anteckningar
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/NoteDto'
+              examples:
+                multiple_notes:
+                  summary: Flera anteckningar
+                  value:
+                    - id: "note1"
+                      userId: "user1"
+                      title: "Min första anteckning"
+                      content: '{"lines": [{"text": "Detta är min första anteckning"}]}'
+                      lastModified: 1730707200000
+                    - id: "note2"
+                      userId: "user1"
+                      title: "Shoppinglista"
+                      content: '{"lines": [{"text": "Mjölk"}, {"text": "Bröd"}]}'
+                      lastModified: 1730620800000
+                empty_list:
+                  summary: Tom lista
+                  value: []
+        '400':
+          description: Felaktigt userId
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Missing userId"
+
+    post:
+      summary: Skapa en ny anteckning
+      description: Skapar en ny anteckning för den specificerade användaren
+      tags:
+        - Notes
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          description: Användarens unika ID
+          schema:
+            type: string
+            example: "user1"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateNoteRequest'
+            examples:
+              simple_note:
+                summary: Enkel anteckning
+                value:
+                  title: "Ny anteckning"
+                  content: '{"lines": [{"text": "Detta är innehållet"}]}'
+              shopping_list:
+                summary: Shoppinglista
+                value:
+                  title: "Handla"
+                  content: '{"lines": [{"text": "Mjölk"}, {"text": "Bröd"}, {"text": "Ägg"}]}'
+      responses:
+        '201':
+          description: Anteckning skapad
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoteDto'
+        '400':
+          description: Felaktig förfrågan
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Invalid request body"
+
+  /users/{userId}/notes/{noteId}:
+    get:
+      summary: Hämta en specifik anteckning
+      description: Returnerar en specifik anteckning baserat på användar-ID och antecknings-ID
+      tags:
+        - Notes
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          description: Användarens unika ID
+          schema:
+            type: string
+            example: "user1"
+        - name: noteId
+          in: path
+          required: true
+          description: Anteckningens unika ID
+          schema:
+            type: string
+            example: "note1"
+      responses:
+        '200':
+          description: Anteckning hittad
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoteDto'
+              example:
+                id: "note1"
+                userId: "user1"
+                title: "Min första anteckning"
+                content: '{"lines": [{"text": "Detta är min första anteckning"}]}'
+                lastModified: 1730707200000
+        '404':
+          description: Anteckning hittades inte
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Note not found"
+        '400':
+          description: Felaktiga parametrar
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Missing userId or noteId"
+
+    put:
+      summary: Uppdatera en anteckning
+      description: Uppdaterar titel och innehåll för en befintlig anteckning
+      tags:
+        - Notes
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          description: Användarens unika ID
+          schema:
+            type: string
+            example: "user1"
+        - name: noteId
+          in: path
+          required: true
+          description: Anteckningens unika ID
+          schema:
+            type: string
+            example: "note1"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateNoteRequest'
+            example:
+              title: "Uppdaterad titel"
+              content: '{"lines": [{"text": "Uppdaterat innehåll"}]}'
+      responses:
+        '200':
+          description: Anteckning uppdaterad
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Note updated successfully"
+        '404':
+          description: Anteckning hittades inte
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Note not found or update failed"
+        '400':
+          description: Felaktig förfrågan
+          content:
+            text/plain:
+              schema:
+                type: string
+
+    delete:
+      summary: Radera en anteckning
+      description: Raderar en specifik anteckning permanent
+      tags:
+        - Notes
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          description: Användarens unika ID
+          schema:
+            type: string
+            example: "user1"
+        - name: noteId
+          in: path
+          required: true
+          description: Anteckningens unika ID
+          schema:
+            type: string
+            example: "note1"
+      responses:
+        '200':
+          description: Anteckning raderad
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Note deleted successfully"
+        '404':
+          description: Anteckning hittades inte
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Note not found or deletion failed"
+        '400':
+          description: Felaktiga parametrar
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /users/{userId}/notes/{noteId}/copy:
+    post:
+      summary: Kopiera en anteckning (värdekopiering)
+      description: Skapar en ny anteckning med kopierat innehåll från originalet. Ändringar i originalet påverkar inte kopian.
+      tags:
+        - Advanced Operations
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          description: Användarens unika ID
+          schema:
+            type: string
+            example: "user1"
+        - name: noteId
+          in: path
+          required: true
+          description: ID för anteckningen som ska kopieras
+          schema:
+            type: string
+            example: "base-pack"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                newTitle:
+                  type: string
+                  description: Ny titel för kopian (valfri)
+                  example: "Min personliga packlista"
+      responses:
+        '201':
+          description: Anteckning kopierad
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoteDto'
+        '404':
+          description: Källanteckning hittades inte
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Failed to copy note"
+
+  /users/{userId}/notes/{noteId}/reference:
+    post:
+      summary: Skapa en referens till annan anteckning (levande länk)
+      description: Skapar en levande referens från denna anteckning till en annan. Ändringar i den refererade anteckningen syns automatiskt.
+      tags:
+        - Advanced Operations
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          description: Användarens unika ID
+          schema:
+            type: string
+            example: "user1"
+        - name: noteId
+          in: path
+          required: true
+          description: ID för anteckningen som ska innehålla referensen
+          schema:
+            type: string
+            example: "skid-pack"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - referencedNoteId
+              properties:
+                referencedNoteId:
+                  type: string
+                  description: ID för anteckningen som ska refereras
+                  example: "base-pack"
+                position:
+                  type: integer
+                  description: Position i content-listan (valfri)
+                  example: 0
+                  default: 0
+      responses:
+        '201':
+          description: Referens skapad
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  referenceId:
+                    type: string
+                    example: "ref-uuid-123"
+        '400':
+          description: Felaktig förfrågan eller anteckning finns inte
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Failed to create reference. Make sure both notes exist."
+
+  /users/{userId}/notes/{noteId}/expanded:
+    get:
+      summary: Hämta anteckning med expanderade referenser
+      description: Returnerar anteckningen med alla NoteReference ersatta med det faktiska innehållet från refererade anteckningar
+      tags:
+        - Advanced Operations
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          description: Användarens unika ID
+          schema:
+            type: string
+            example: "user1"
+        - name: noteId
+          in: path
+          required: true
+          description: Anteckningens unika ID
+          schema:
+            type: string
+            example: "skid-pack"
+      responses:
+        '200':
+          description: Anteckning med expanderade referenser
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoteDto'
+        '404':
+          description: Anteckning hittades inte
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Note not found"
+
+  /users/{userId}/notes/{noteId}/references:
+    get:
+      summary: Lista alla referenser från denna anteckning
+      description: Returnerar ID:n för alla anteckningar som denna anteckning refererar till
+      tags:
+        - Advanced Operations
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "user1"
+        - name: noteId
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "skid-pack"
+      responses:
+        '200':
+          description: Lista med refererade antecknings-ID:n
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  referencedNoteIds:
+                    type: array
+                    items:
+                      type: string
+                    example: ["base-pack", "winter-pack"]
+    delete:
+      summary: Ta bort alla referenser från denna anteckning
+      description: Raderar alla utgående referenser från anteckningen
+      tags:
+        - Advanced Operations
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "user1"
+        - name: noteId
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "skid-pack"
+      responses:
+        '200':
+          description: Referenser raderade
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Deleted 2 references"
+
+  /users/{userId}/notes/{noteId}/referenced-by:
+    get:
+      summary: Lista anteckningar som refererar till denna
+      description: Returnerar ID:n för alla anteckningar som har en referens till denna anteckning
+      tags:
+        - Advanced Operations
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "user1"
+        - name: noteId
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "base-pack"
+      responses:
+        '200':
+          description: Lista med anteckningar som refererar hit
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  referencedByNoteIds:
+                    type: array
+                    items:
+                      type: string
+                    example: ["skid-pack", "summer-pack"]
+
+  /posts:
+    get:
+      summary: Hämta inlägg (placeholder)
+      description: Placeholder-endpoint för framtida funktionalitet
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Placeholder-svar
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "List of posts will be here."
+
+components:
+  schemas:
+    NoteDto:
+      type: object
+      description: Data Transfer Object för en anteckning
+      required:
+        - id
+        - userId
+        - title
+        - content
+        - lastModified
+      properties:
+        id:
+          type: string
+          description: Anteckningens unika ID (UUID)
+          example: "note1"
+        userId:
+          type: string
+          description: Användarens unika ID
+          example: "user1"
+        title:
+          type: string
+          description: Anteckningens titel
+          maxLength: 255
+          example: "Min första anteckning"
+        content:
+          type: string
+          description: Anteckningens innehåll som JSON-sträng
+          example: '{"lines": [{"text": "Detta är min första anteckning"}]}'
+        lastModified:
+          type: integer
+          format: int64
+          description: Tidsstämpel för senaste ändring (Unix timestamp i millisekunder)
+          example: 1730707200000
+
+    CreateNoteRequest:
+      type: object
+      description: Request-body för att skapa en ny anteckning
+      required:
+        - title
+        - content
+      properties:
+        title:
+          type: string
+          description: Anteckningens titel
+          maxLength: 255
+          example: "Ny anteckning"
+        content:
+          type: string
+          description: Anteckningens innehåll som JSON-sträng
+          example: '{"lines": [{"text": "Detta är innehållet"}]}'
+
+    UpdateNoteRequest:
+      type: object
+      description: Request-body för att uppdatera en anteckning
+      required:
+        - title
+        - content
+      properties:
+        title:
+          type: string
+          description: Ny titel för anteckningen
+          maxLength: 255
+          example: "Uppdaterad titel"
+        content:
+          type: string
+          description: Nytt innehåll som JSON-sträng
+          example: '{"lines": [{"text": "Uppdaterat innehåll"}]}'
+
+    ErrorResponse:
+      type: object
+      description: Standardformat för felmeddelanden
+      properties:
+        message:
+          type: string
+          description: Beskrivning av felet
+          example: "Note not found"
+        status:
+          type: integer
+          description: HTTP-statuskod
+          example: 404
+

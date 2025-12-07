@@ -5,15 +5,28 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.serialization.json.JsonArray
@@ -204,6 +217,9 @@ fun CheckboxListView(
         parser.parseToCheckboxItems(note.content).getOrElse { emptyList() }
     }
     
+    // State för att hålla reda på vilken rad som ska få fokus
+    var focusRequestIndex by remember { mutableStateOf<Int?>(null) }
+    
     Column(modifier = modifier.fillMaxSize()) {
         Surface(
             modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -217,6 +233,8 @@ fun CheckboxListView(
                     val item = checkboxItems[index]
                     CheckboxListItem(
                         item = item,
+                        shouldFocus = focusRequestIndex == index,
+                        onFocusConsumed = { focusRequestIndex = null },
                         onCheckedChange = { checked ->
                             val updatedItems = checkboxItems.toMutableList()
                             updatedItems[index] = item.copy(checked = checked)
@@ -231,6 +249,18 @@ fun CheckboxListView(
                             val updatedItems = checkboxItems.toMutableList()
                             updatedItems.removeAt(index)
                             saveCheckboxItems(note, updatedItems, onUpdateNote, parser)
+                        },
+                        onNewLine = {
+                            // Skapa ny rad efter denna
+                            val updatedItems = checkboxItems.toMutableList()
+                            updatedItems.add(index + 1, CheckboxItem(
+                                id = kotlin.random.Random.nextInt().toString(),
+                                text = "",
+                                checked = false
+                            ))
+                            saveCheckboxItems(note, updatedItems, onUpdateNote, parser)
+                            // Fokusera den nya raden
+                            focusRequestIndex = index + 1
                         }
                     )
                     if (index < checkboxItems.size - 1) {
@@ -317,12 +347,39 @@ fun CheckboxListView(
 @Composable
 fun CheckboxListItem(
     item: CheckboxItem,
+    shouldFocus: Boolean,
+    onFocusConsumed: () -> Unit,
     onCheckedChange: (Boolean) -> Unit,
     onTextChange: (String) -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onNewLine: () -> Unit
 ) {
     var isEditing by remember { mutableStateOf(false) }
-    var text by remember(item.text) { mutableStateOf(item.text) }
+    var textFieldValue by remember(item.text) { 
+        mutableStateOf(TextFieldValue(text = item.text, selection = TextRange(item.text.length)))
+    }
+    val focusRequester = remember { FocusRequester() }
+    var needsFocus by remember { mutableStateOf(false) }
+    var textLayoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
+    
+    // Uppdatera TextFieldValue när item.text ändras utifrån
+    LaunchedEffect(item.text) {
+        if (textFieldValue.text != item.text) {
+            textFieldValue = TextFieldValue(
+                text = item.text,
+                selection = TextRange(item.text.length)
+            )
+        }
+    }
+    
+    // Om denna rad ska få fokus från extern trigger (t.ex. ny rad skapad)
+    LaunchedEffect(shouldFocus) {
+        if (shouldFocus) {
+            isEditing = true
+            needsFocus = true
+            onFocusConsumed()
+        }
+    }
     
     Row(
         modifier = Modifier
@@ -342,26 +399,65 @@ fun CheckboxListItem(
         // Text / TextField
         if (isEditing && !item.isReference) {
             BasicTextField(
-                value = text,
-                onValueChange = { 
-                    text = it
-                    onTextChange(it)
+                value = textFieldValue,
+                onValueChange = { newValue ->
+                    textFieldValue = newValue
+                    onTextChange(newValue.text)
                 },
                 modifier = Modifier
                     .weight(1f)
-                    .padding(vertical = 8.dp),
+                    .padding(vertical = 8.dp)
+                    .focusRequester(focusRequester)
+                    .onGloballyPositioned {
+                        // TextField är nu renderad och redo - begär fokus om vi behöver det
+                        if (needsFocus) {
+                            try {
+                                focusRequester.requestFocus()
+                                needsFocus = false
+                            } catch (e: Exception) {
+                                println("Could not request focus: ${e.message}")
+                            }
+                        }
+                    },
                 textStyle = MaterialTheme.typography.bodyMedium.copy(
                     color = MaterialTheme.colorScheme.onSurface,
                     textDecoration = if (item.checked) TextDecoration.LineThrough else TextDecoration.None
                 ),
-                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary)
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                singleLine = true, // Inga multiline!
+                keyboardOptions = KeyboardOptions(
+                    imeAction = ImeAction.Next
+                ),
+                keyboardActions = KeyboardActions(
+                    onNext = {
+                        // Enter tryckt → skapa ny rad
+                        onNewLine()
+                    }
+                )
             )
         } else {
             Text(
                 text = if (item.text.isEmpty()) "Tom rad..." else item.text,
                 modifier = Modifier
                     .weight(1f)
-                    .clickable { isEditing = true }
+                    .pointerInput(Unit) {
+                        detectTapGestures { offset ->
+                            // Beräkna vilken position i texten som klickades
+                            val clickedPosition = textLayoutResult?.let { layout ->
+                                layout.getOffsetForPosition(offset)
+                            } ?: item.text.length
+                            
+                            // Uppdatera TextFieldValue med korrekt cursor-position
+                            textFieldValue = TextFieldValue(
+                                text = item.text,
+                                selection = TextRange(clickedPosition)
+                            )
+                            
+                            // Aktivera editing-läge
+                            needsFocus = true
+                            isEditing = true
+                        }
+                    }
                     .padding(vertical = 8.dp),
                 fontSize = 14.sp,
                 textDecoration = if (item.checked) TextDecoration.LineThrough else TextDecoration.None,
@@ -371,12 +467,15 @@ fun CheckboxListItem(
                     MaterialTheme.colorScheme.primary
                 } else {
                     MaterialTheme.colorScheme.onSurface
+                },
+                onTextLayout = { layoutResult ->
+                    textLayoutResult = layoutResult
                 }
             )
         }
         
         // Ta bort-knapp
-        if (isEditing || text.isEmpty()) {
+        if (isEditing || textFieldValue.text.isEmpty()) {
             IconButton(
                 onClick = onDelete,
                 modifier = Modifier.size(24.dp)

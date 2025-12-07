@@ -8,6 +8,7 @@ plugins {
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
     alias(libs.plugins.kotlinSerialization)
+    alias(libs.plugins.ksp)
 }
 
 kotlin {
@@ -34,6 +35,10 @@ kotlin {
         androidMain.dependencies {
             implementation(compose.preview)
             implementation(libs.androidx.activity.compose)
+            
+            // Room for local database (offline-first)
+            implementation(libs.androidx.room.runtime)
+            implementation(libs.androidx.room.ktx)
         }
         commonMain.dependencies {
             implementation(compose.runtime)
@@ -95,6 +100,9 @@ android {
 
 dependencies {
     debugImplementation(compose.uiTooling)
+    
+    // Room compiler for annotation processing
+    add("kspAndroid", libs.androidx.room.compiler)
 }
 
 compose.desktop {

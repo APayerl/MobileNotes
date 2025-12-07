@@ -46,9 +46,10 @@ fun AndroidNotesListScreen(
                     IconButton(onClick = onRefresh) {
                         Icon(Icons.Default.Refresh, contentDescription = "Uppdatera")
                     }
-                    IconButton(onClick = onLogout) {
-                        Icon(Icons.Default.PowerSettingsNew, contentDescription = "Logga ut")
-                    }
+                    // TODO: Återaktivera logout-knapp när online mode finns
+                    // IconButton(onClick = onLogout) {
+                    //     Icon(Icons.Default.PowerSettingsNew, contentDescription = "Logga ut")
+                    // }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer

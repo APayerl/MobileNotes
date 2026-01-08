@@ -4,6 +4,8 @@ import CheckboxView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -485,6 +487,9 @@ private fun NoteDetailContentRow(
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var accumulatedSwipeOffset by remember { mutableStateOf(0f) }
+    val swipeThreshold = 50f // pixels needed to trigger indent change
+
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -509,6 +514,33 @@ private fun NoteDetailContentRow(
                     },
                     onDrag = { _, dragAmount ->
                         onDrag(dragAmount.y)
+                    }
+                )
+            }
+            .pointerInput(itemIndex, item.indents) {
+                detectHorizontalDragGestures(
+                    onDragEnd = {
+                        // Check if swipe was significant enough
+                        if (accumulatedSwipeOffset > swipeThreshold) {
+                            // Swipe right - increase indent
+                            val newIndent = (item.indents + 1).coerceAtMost(10) // Max 10 indents
+                            if (newIndent != item.indents) {
+                                onChange(item.copy(indents = newIndent))
+                            }
+                        } else if (accumulatedSwipeOffset < -swipeThreshold) {
+                            // Swipe left - decrease indent
+                            val newIndent = (item.indents - 1).coerceAtLeast(0) // Min 0 indents
+                            if (newIndent != item.indents) {
+                                onChange(item.copy(indents = newIndent))
+                            }
+                        }
+                        accumulatedSwipeOffset = 0f
+                    },
+                    onDragCancel = {
+                        accumulatedSwipeOffset = 0f
+                    },
+                    onHorizontalDrag = { _, dragAmount ->
+                        accumulatedSwipeOffset += dragAmount
                     }
                 )
             },

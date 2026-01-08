@@ -1,8 +1,9 @@
-package se.payerl.mobilenotes.ui.components
+package se.payerl.mobilenotes.ui.screens
 
 import CheckboxView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -17,16 +18,82 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import se.payerl.mobilenotes.data.storage.MyNoteStorage
+import se.payerl.mobilenotes.db.Note
 import se.payerl.mobilenotes.db.NoteItem
+import se.payerl.mobilenotes.viewmodel.MyViewModelFactory
+import se.payerl.mobilenotes.viewmodel.NoteDetailViewModel
 import kotlin.time.Clock
+
+/**
+ * Note Detail screen - simplified version with all UI in one file.
+ * No complex state management, just simple flows.
+ */
+@Composable
+fun NoteDetailScreen(
+    storage: MyNoteStorage,
+    noteId: String,
+    onBackClick: () -> Unit
+) {
+    // Create ViewModel with storage
+    val viewModel: NoteDetailViewModel = viewModel(
+        factory = MyViewModelFactory(storage)
+    )
+
+    val note by viewModel.note.collectAsState()
+    val items by viewModel.items.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    val errorMessage by viewModel.errorMessage.collectAsState()
+
+    // Load note when composable is first displayed
+    LaunchedEffect(noteId) {
+        viewModel.loadNote(noteId)
+    }
+
+    // Show error as snackbar if present
+    val snackbarHostState = remember { SnackbarHostState() }
+    LaunchedEffect(errorMessage) {
+        errorMessage?.let {
+            snackbarHostState.showSnackbar(
+                message = it,
+                duration = SnackbarDuration.Short
+            )
+            viewModel.clearError()
+        }
+    }
+
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) }
+    ) { padding ->
+        if (isLoading || note == null) {
+            // Simple loading indicator
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+        } else {
+            NoteDetailContent(
+                note = note!!,
+                items = items,
+                storage = storage,
+                onItemChange = viewModel::updateItem,
+                onAddItem = { viewModel.addItem("New item") },
+                onDeleteItem = viewModel::deleteItem,
+                onMoveItem = viewModel::moveItem,
+                onBackClick = onBackClick
+            )
+        }
+    }
+}
 
 /**
  * Visningsläge för ListView
@@ -37,20 +104,61 @@ enum class ListViewMode {
 }
 
 @Composable
-fun NoteDetailContent(
-    noteId: String,
-    title: String,
+private fun NoteDetailContent(
+    note: Note,
     items: List<NoteItem>,
     storage: MyNoteStorage,
     onItemChange: (NoteItem) -> Unit,
     onAddItem: () -> Unit,
     onDeleteItem: (String) -> Unit,
+    onMoveItem: (fromIndex: Int, toIndex: Int) -> Unit,
     onBackClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    lastEdited: String = "Last edited ----"
+    modifier: Modifier = Modifier
 ) {
     var viewMode by remember { mutableStateOf(ListViewMode.CHECKLIST) }
-    val titleFieldState = rememberTextFieldState(title)
+    val titleFieldState = rememberTextFieldState(note.name)
+    var draggedItemIndex by remember { mutableStateOf<Int?>(null) }
+    var dragTargetIndex by remember { mutableStateOf<Int?>(null) }
+    var draggedFromIndex by remember { mutableStateOf<Int?>(null) }
+    var cumulativeDragOffset by remember { mutableStateOf(0f) }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+
+    // Update titleFieldState when title parameter changes
+    LaunchedEffect(note.name) {
+        if (titleFieldState.text.toString() != note.name) {
+            titleFieldState.edit {
+                replace(0, length, note.name)
+            }
+        }
+    }
+
+    // Calculate drop target based on cumulative drag offset
+    LaunchedEffect(cumulativeDragOffset, draggedFromIndex) {
+        val fromIndex = draggedFromIndex
+        if (fromIndex != null) {
+            val rowHeightPx = with(density) { 40.dp.toPx() }
+            val offsetRows = (cumulativeDragOffset / rowHeightPx).toInt()
+            val newTargetIndex = (fromIndex + offsetRows).coerceIn(0, items.size - 1)
+            dragTargetIndex = newTargetIndex
+        }
+    }
+
+    // Format last edited
+    val lastEdited = remember(note.lastModified) {
+        val now = Clock.System.now().toEpochMilliseconds()
+        val diffMillis = now - note.lastModified
+        val diffMinutes = diffMillis / (1000 * 60)
+        val diffHours = diffMillis / (1000 * 60 * 60)
+        val diffDays = diffMillis / (1000 * 60 * 60 * 24)
+
+        when {
+            diffMinutes < 1 -> "Last edited just now"
+            diffMinutes < 60 -> "Last edited $diffMinutes min ago"
+            diffHours < 24 -> "Last edited $diffHours hours ago"
+            diffDays < 7 -> "Last edited $diffDays days ago"
+            else -> "Last edited long ago"
+        }
+    }
 
     Column(
         modifier = modifier
@@ -75,7 +183,7 @@ fun NoteDetailContent(
                 text = lastEdited,
                 fontSize = 12.sp,
                 color = Color.Gray,
-                modifier = Modifier.align(Alignment.End)
+                modifier = Modifier.align(Alignment.End).padding(end = 16.dp)
             )
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -91,9 +199,8 @@ fun NoteDetailContent(
                 modifier = Modifier.padding(horizontal = 16.dp)
             )
             LaunchedEffect(titleFieldState.text.toString()) {
-                if (titleFieldState.text.toString() != title) {
-                    val oldNote = storage.getNote(noteId)
-                    val newNote = oldNote.copy(
+                if (titleFieldState.text.toString() != note.name) {
+                    val newNote = note.copy(
                         name = titleFieldState.text.toString(),
                         lastModified = Clock.System.now().toEpochMilliseconds()
                     )
@@ -114,9 +221,57 @@ fun NoteDetailContent(
                     Spacer(modifier = Modifier.height(1.dp))
                 }
 
-                items(items.size) { index ->
+                items(
+                    count = items.size,
+                    key = { index -> items[index].id }
+                ) { index ->
+                    // Show ghost/shadow of dragged item at drop target position
+                    if (dragTargetIndex == index && draggedItemIndex != null && draggedItemIndex != index) {
+                        val draggedItem = items[draggedItemIndex!!]
+                        NoteDetailContentRow(
+                            item = draggedItem,
+                            itemIndex = -1,
+                            isDragging = false,
+                            isDropTarget = false,
+                            onDragStart = { },
+                            onDrag = { },
+                            onDragEnd = { },
+                            onChange = { },
+                            onDelete = { },
+                            storage = storage,
+                            modifier = Modifier
+                                .height(40.dp)
+                                .alpha(0.6f)
+                                .border(2.dp, Color(0xFF4CAF50), RoundedCornerShape(4.dp))
+                        )
+                    }
+
                     NoteDetailContentRow(
                         item = items[index],
+                        itemIndex = index,
+                        isDragging = draggedItemIndex == index,
+                        isDropTarget = false,
+                        onDragStart = {
+                            draggedItemIndex = it
+                            draggedFromIndex = it
+                            cumulativeDragOffset = 0f
+                        },
+                        onDrag = { offset ->
+                            cumulativeDragOffset += offset
+                        },
+                        onDragEnd = {
+                            val fromIndex = draggedFromIndex
+                            val toIndex = dragTargetIndex
+
+                            draggedItemIndex = null
+                            dragTargetIndex = null
+                            draggedFromIndex = null
+                            cumulativeDragOffset = 0f
+
+                            if (fromIndex != null && toIndex != null && fromIndex != toIndex) {
+                                onMoveItem(fromIndex, toIndex)
+                            }
+                        },
                         onChange = { noteItem ->
                             onItemChange(noteItem)
                         },
@@ -124,7 +279,9 @@ fun NoteDetailContent(
                             onDeleteItem(items[index].id)
                         },
                         storage = storage,
-                        modifier = Modifier.height(40.dp)
+                        modifier = Modifier
+                            .height(40.dp)
+                            .alpha(if (draggedItemIndex == index) 0.3f else 1f)
                     )
                 }
 
@@ -133,12 +290,12 @@ fun NoteDetailContent(
                 }
             }
 
-            // Bottom toolbar med lägesväxlare
+            // Bottom toolbar
             ListFooter(
                 viewMode = viewMode,
                 onViewModeChange = { viewMode = it },
-                onShare = { /* Dela */ },
-                onTools = { /* Verktyg */ },
+                onShare = { },
+                onTools = { },
                 verticalPadding = 6.dp,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -150,17 +307,16 @@ fun NoteDetailContent(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TopBar(title: String,
-           navBack: () -> Unit = {},
-           sort: () -> Unit = {},
-           addItem: () -> Unit = {},
-           menu: () -> Unit = {}) {
-    // Topbar med grön bakgrund
+private fun TopBar(
+    title: String,
+    navBack: () -> Unit = {},
+    sort: () -> Unit = {},
+    addItem: () -> Unit = {},
+    menu: () -> Unit = {}
+) {
     TopAppBar(
         title = {
-            Row(
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = navBack) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
@@ -202,17 +358,13 @@ fun TopBar(title: String,
             }
         },
         colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = Color(0xFF4CAF50) // Grön färg som i skärmdumpen
+            containerColor = Color(0xFF4CAF50)
         )
     )
 }
 
-/**
- * Footer-komponent för ShoppingListView
- * Innehåller dela-knapp, lägesväxlare och verktygs-knapp
- */
 @Composable
-fun ListFooter(
+private fun ListFooter(
     viewMode: ListViewMode,
     onViewModeChange: (ListViewMode) -> Unit,
     onShare: () -> Unit,
@@ -230,7 +382,6 @@ fun ListFooter(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Dela-knapp
         IconButton(
             onClick = onShare,
             modifier = Modifier.fillMaxHeight()
@@ -243,10 +394,7 @@ fun ListFooter(
             )
         }
 
-        // Lägesväxlare
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(0.dp),
-        ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(0.dp)) {
             Button(
                 onClick = { onViewModeChange(ListViewMode.CHECKLIST) },
                 colors = ButtonDefaults.buttonColors(
@@ -308,7 +456,6 @@ fun ListFooter(
             }
         }
 
-        // Verktygs-knapp
         IconButton(
             onClick = onTools,
             modifier = Modifier.fillMaxHeight()
@@ -323,12 +470,15 @@ fun ListFooter(
     }
 }
 
-/**
- * En rad i listan
- */
 @Composable
-fun NoteDetailContentRow(
+private fun NoteDetailContentRow(
     item: NoteItem,
+    itemIndex: Int,
+    isDragging: Boolean,
+    isDropTarget: Boolean,
+    onDragStart: (Int) -> Unit,
+    onDrag: (Float) -> Unit,
+    onDragEnd: () -> Unit,
     storage: MyNoteStorage,
     backColor: Color = Color(0xFFE8F5E9),
     onChange: (NoteItem) -> Unit,
@@ -339,13 +489,38 @@ fun NoteDetailContentRow(
         modifier = modifier
             .fillMaxWidth()
             .fillMaxHeight()
-            .background(color = Color.White),
+            .background(
+                color = when {
+                    isDragging -> Color(0xFFBBDEFB)
+                    isDropTarget -> Color(0xFFC8E6C9)
+                    else -> Color.White
+                }
+            )
+            .pointerInput(itemIndex) {
+                detectDragGesturesAfterLongPress(
+                    onDragStart = {
+                        onDragStart(itemIndex)
+                    },
+                    onDragEnd = {
+                        onDragEnd()
+                    },
+                    onDragCancel = {
+                        onDragEnd()
+                    },
+                    onDrag = { _, dragAmount ->
+                        onDrag(dragAmount.y)
+                    }
+                )
+            },
         verticalAlignment = Alignment.CenterVertically
     ) {
-        for (i in 0 until item.indents) {
-            Spacer(modifier = Modifier
-                .aspectRatio(1.0f)
-                .fillMaxHeight())
+        // Spacers for indentation
+        repeat(item.indents.toInt()) {
+            Spacer(
+                modifier = Modifier
+                    .aspectRatio(1.0f)
+                    .fillMaxHeight()
+            )
         }
 
         // Checkbox
@@ -358,7 +533,7 @@ fun NoteDetailContentRow(
             backColor = backColor
         )
 
-        // Editable text field using BasicTextField for better control
+        // Editable text field
         Box(
             modifier = Modifier
                 .weight(1f)
@@ -381,11 +556,10 @@ fun NoteDetailContentRow(
 
             LaunchedEffect(textFieldState.text.toString()) {
                 if (textFieldState.text.toString() != item.content) {
-                    //Get instance of MyNoteStorage from corect platform
-                    storage.addNote(item.id, textFieldState.text.toString())
                     onChange(item.copy(content = textFieldState.text.toString()))
                 }
             }
         }
     }
 }
+

@@ -16,33 +16,25 @@ import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
 /**
- * UI State for the Note Detail screen.
- */
-sealed interface NoteDetailUiState {
-    data object Loading : NoteDetailUiState
-    data class Success(val note: Note) : NoteDetailUiState
-    data class Error(val message: String) : NoteDetailUiState
-}
-
-/**
  * ViewModel for the Note Detail screen using MyNoteStorage directly.
  *
- * Displays and allows editing of a single note.
- * Simple and straightforward - fetches note from storage.
+ * Simplified version without complex state management.
+ * Uses simple flows for note, items, loading state, and errors.
  */
 class NoteDetailViewModel(
     private val storage: MyNoteStorage
 ) : ViewModel() {
 
-    companion object {
-        private const val POSITION_GAP = 1_000_000L  // Gap between positions for lazy normalization
-    }
-
-    private val _uiState = MutableStateFlow<NoteDetailUiState>(NoteDetailUiState.Loading)
-    val uiState: StateFlow<NoteDetailUiState> = _uiState.asStateFlow()
-
+    private val _note = MutableStateFlow<Note?>(null)
+    val note: StateFlow<Note?> = _note.asStateFlow()
     private val _items = MutableStateFlow<List<NoteItem>>(emptyList())
     val items: StateFlow<List<NoteItem>> = _items.asStateFlow()
+
+    private val _isLoading = MutableStateFlow(false)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+
+    private val _errorMessage = MutableStateFlow<String?>(null)
+    val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
     private var currentNoteId: String? = null
 
@@ -52,29 +44,28 @@ class NoteDetailViewModel(
      */
     fun loadNote(noteId: String) {
         currentNoteId = noteId
+        _isLoading.value = true
 
         viewModelScope.launch {
-            _uiState.value = NoteDetailUiState.Loading
-
             try {
                 val dbNote = storage.getNote(noteId)
-
-                // Convert database model to domain model
-                val note = Note(
-                    id = dbNote.id,
-                    folderId = dbNote.folderId,
-                    name = dbNote.name,
-                    lastModified = dbNote.lastModified
-                )
-
-                _items.value = storage.getNoteItems(note.id)
-                _uiState.value = NoteDetailUiState.Success(note)
+                _note.value = dbNote
+                _items.value = ArrayList(storage.getNoteItems(noteId))
+                _errorMessage.value = null
             } catch (exception: Exception) {
-                _uiState.value = NoteDetailUiState.Error(
-                    exception.message ?: "Failed to load note"
-                )
+                _errorMessage.value = exception.message ?: "Failed to load note"
+                AppLogger.error("NoteDetailViewModel", "Failed to load note: ${exception.message}")
+            } finally {
+                _isLoading.value = false
             }
         }
+    }
+
+    /**
+     * Clear error message after it's been shown
+     */
+    fun clearError() {
+        _errorMessage.value = null
     }
 
     /**
@@ -118,8 +109,7 @@ class NoteDetailViewModel(
                 val savedItem = storage.addNoteItem(newItem)
                 _items.value += savedItem
             } catch (exception: Exception) {
-                // Handle error
-                println("Failed to add item: ${exception.message}")
+                AppLogger.error("NoteDetailViewModel", "Failed to add item: ${exception.message}")
             }
         }
     }
@@ -133,9 +123,159 @@ class NoteDetailViewModel(
                 storage.deleteNoteItem(itemId)
                 _items.value = _items.value.filter { it.id != itemId }
             } catch (exception: Exception) {
-                // Handle error
-                println("Failed to delete item: ${exception.message}")
+                AppLogger.error("NoteDetailViewModel", "Failed to delete item: ${exception.message}")
             }
         }
     }
+
+    /**
+     * Move an item from one position to another.
+     * Uses lazy normalization strategy - calculates midpoint position between items.
+     * If UNIQUE constraint violation occurs, normalizes all positions and retries.
+     */
+    fun moveItem(fromIndex: Int, toIndex: Int) {
+        if (fromIndex == toIndex) return
+
+        viewModelScope.launch {
+            // Save IDs before try block so they're accessible in catch
+            val originalItems = _items.value
+            val itemToMoveId = originalItems[fromIndex].id
+            val targetItemId = if (toIndex < originalItems.size) originalItems[toIndex].id else null
+
+            try {
+                AppLogger.debug("NoteDetailViewModel", "🔄 Moving item from index $fromIndex to $toIndex")
+                val currentItems = _items.value.toMutableList()
+                val itemToMove = currentItems[fromIndex]
+
+                // Remove item from current position first
+                currentItems.removeAt(fromIndex)
+
+                // Now calculate position based on the adjusted list
+                val adjustedToIndex = toIndex.coerceIn(0, currentItems.size)
+
+                val newPosition = when {
+                    currentItems.isEmpty() -> 0L
+                    adjustedToIndex == 0 -> {
+                        // Moving to start - position before first item
+                        val firstPos = currentItems[0].position
+                        // CRITICAL FIX: If first item is at 0, use negative position to avoid conflict
+                        if (firstPos <= 0) {
+                            -PositionManager.POSITION_GAP
+                        } else {
+                            firstPos / 2
+                        }
+                    }
+                    adjustedToIndex >= currentItems.size -> {
+                        // Moving to end - position after last item
+                        val lastPos = currentItems.last().position
+                        lastPos + PositionManager.POSITION_GAP
+                    }
+                    else -> {
+                        // Moving between items
+                        val prevPos = currentItems[adjustedToIndex - 1].position
+                        val nextPos = currentItems[adjustedToIndex].position
+                        val gap = nextPos - prevPos
+                        if (gap <= 1) {
+                            // No room - need normalization
+                            AppLogger.warn("NoteDetailViewModel", "⚠️ Gap too small ($gap) - will normalize")
+                            throw Exception("UNIQUE constraint - gap exhausted")
+                        }
+                        PositionManager.calculatePositionBetween(prevPos, nextPos)
+                    }
+                }
+
+                AppLogger.debug("NoteDetailViewModel", "📍 New position calculated: $newPosition (from ${itemToMove.position})")
+
+                // Update item with new position
+                val updatedItem = itemToMove.copy(
+                    position = newPosition,
+                    lastModified = Clock.System.now().toEpochMilliseconds()
+                )
+
+                storage.updateNoteItem(updatedItem)
+
+                // Reload items from storage (will be sorted by position)
+                val reloadedItems = storage.getNoteItems(currentNoteId!!)
+
+                _items.value = ArrayList(reloadedItems)
+
+                AppLogger.info("NoteDetailViewModel", "✅ Move completed. Items count: ${reloadedItems.size}")
+                AppLogger.debug("NoteDetailViewModel", "   Positions: ${reloadedItems.map { "${it.content}(${it.position})" }}")
+
+            } catch (exception: Exception) {
+                // Check if it's a UNIQUE constraint violation
+                if (exception.message?.contains("UNIQUE", ignoreCase = true) == true ||
+                    exception.message?.contains("gap exhausted", ignoreCase = true) == true) {
+                    AppLogger.warn("NoteDetailViewModel", "⚠️ Position conflict detected - normalizing positions")
+                    AppLogger.debug("NoteDetailViewModel", "   Current items: ${_items.value.map { "${it.content}(${it.position})" }}")
+                    try {
+                        normalizePositions()
+                        // CRITICAL FIX: Don't retry with same indices - reload and recalculate
+                        val reloadedItems = storage.getNoteItems(currentNoteId!!)
+                        _items.value = ArrayList(reloadedItems)
+
+                        // Find NEW indices after normalization using saved IDs
+                        val newFromIndex = reloadedItems.indexOfFirst { it.id == itemToMoveId }
+                        val newToIndex = if (targetItemId != null) {
+                            reloadedItems.indexOfFirst { it.id == targetItemId }
+                        } else {
+                            reloadedItems.size
+                        }
+
+                        if (newFromIndex >= 0 && newFromIndex != newToIndex) {
+                            AppLogger.info("NoteDetailViewModel", "🔁 Retrying move with NEW indices: $newFromIndex → $newToIndex")
+                            moveItem(newFromIndex, newToIndex)
+                        } else {
+                            AppLogger.info("NoteDetailViewModel", "✅ Items already in correct position after normalization")
+                        }
+                    } catch (normException: Exception) {
+                        AppLogger.error("NoteDetailViewModel", "❌ Normalization failed: ${normException.message}", normException)
+                        // Reload items to at least show current state
+                        _items.value = ArrayList(storage.getNoteItems(currentNoteId!!))
+                    }
+                } else {
+                    AppLogger.error("NoteDetailViewModel", "❌ Failed to move item: ${exception.message}", exception)
+                }
+            }
+        }
+    }
+
+    /**
+     * Re-normalize all item positions with fresh gaps.
+     * Called when UNIQUE constraint violation occurs (rare).
+     *
+     * Strategy: First move all items to negative positions (guaranteed no conflict),
+     * then move them to correct positive positions.
+     */
+    private fun normalizePositions() {
+        val noteId = currentNoteId ?: return
+        val currentItems = _items.value.sortedBy { it.position }
+
+        val newPositions = PositionManager.normalizePositions(currentItems.size)
+        val now = Clock.System.now().toEpochMilliseconds()
+
+        // Step 1: Move all items to negative temporary positions to avoid conflicts
+        currentItems.forEachIndexed { index, item ->
+            val tempPosition = -(index + 1).toLong() // -1, -2, -3, etc.
+            val updatedItem = item.copy(
+                position = tempPosition,
+                lastModified = now
+            )
+            storage.updateNoteItem(updatedItem)
+        }
+
+        // Step 2: Move all items to their final positive positions
+        currentItems.zip(newPositions).forEach { (item, newPos) ->
+            val updatedItem = item.copy(
+                position = newPos,
+                lastModified = now
+            )
+            storage.updateNoteItem(updatedItem)
+        }
+
+        // Reload items with new list instance
+        val reloadedItems = storage.getNoteItems(noteId)
+        _items.value = ArrayList(reloadedItems)
+        AppLogger.info("NoteDetailViewModel", "✅ Normalized ${currentItems.size} items")
+   }
 }

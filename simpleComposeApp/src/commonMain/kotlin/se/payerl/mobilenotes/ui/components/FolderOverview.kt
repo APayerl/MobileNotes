@@ -260,25 +260,3 @@ fun FolderRow(folder: Folder, onClick: () -> Unit, modifier: Modifier = Modifier
             .background(MaterialTheme.colorScheme.background)) {}
     }
 }
-
-///**
-// * Preview-funktion för att visa hur vyn ser ut
-// */
-//@Preview
-//@Composable
-//fun FolderOverviewPreview() {
-//    MobileNotesTheme {
-//        val currentTime = kotlin.time.Clock.System.now().toEpochMilliseconds()
-//        FolderOverviewContent(
-//            folders = listOf(
-//                Folder("1", "My notes", 5, currentTime),
-//                Folder("2", "Work", 3, currentTime - 1000000),
-//                Folder("3", "Personal", 8, currentTime - 2000000)
-//            ),
-//            isLoading = false,
-//            onFolderClick = {},
-//            onCreateFolder = {},
-//            onRefresh = {}
-//        )
-//    }
-//}

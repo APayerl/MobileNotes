@@ -9,11 +9,10 @@ import androidx.navigation.navArgument
 import se.payerl.mobilenotes.data.storage.MyNoteStorage
 import se.payerl.mobilenotes.navigation.getNavigationArgument
 import se.payerl.mobilenotes.ui.components.FolderOverview
-import se.payerl.mobilenotes.ui.components.NoteDetail
 import se.payerl.mobilenotes.ui.components.NotesOverview
+import se.payerl.mobilenotes.ui.screens.NoteDetailScreen
 import se.payerl.mobilenotes.ui.theme.MobileNotesTheme
 import se.payerl.mobilenotes.util.AppLogger
-
 @Composable
 fun App(storage: MyNoteStorage) {
     MobileNotesTheme {
@@ -78,8 +77,8 @@ fun App(storage: MyNoteStorage) {
 
                 AppLogger.info("Navigation", "Displaying note detail: $noteId")
 
-                // Use NoteDetail with ListView as GUI
-                NoteDetail(
+                // Use new simplified NoteDetailScreen
+                NoteDetailScreen(
                     storage = storage,
                     noteId = noteId,
                     onBackClick = {

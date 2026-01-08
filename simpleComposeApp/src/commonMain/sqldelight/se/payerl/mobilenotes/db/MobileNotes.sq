@@ -1,0 +1,170 @@
+import se.payerl.mobilenotes.data.adapters.BooleanColumnAdapter;
+
+-- Table for storing folders (parent table - must be created first)
+CREATE TABLE IF NOT EXISTS Folder (
+    id TEXT NOT NULL PRIMARY KEY,  -- UUID stored as TEXT (36 chars)
+    name TEXT NOT NULL,
+    noteCount INTEGER NOT NULL DEFAULT 0,  -- Maintained automatically by database triggers
+    lastModified INTEGER NOT NULL  -- Unix timestamp in milliseconds
+);
+
+-- Table for storing notes (child table - references Folder)
+CREATE TABLE IF NOT EXISTS Note (
+    id TEXT NOT NULL PRIMARY KEY,  -- UUID stored as TEXT (36 chars)
+    folderId TEXT NOT NULL,
+    name TEXT NOT NULL,
+    lastModified INTEGER NOT NULL,  -- Unix timestamp in milliseconds
+    FOREIGN KEY (folderId) REFERENCES Folder(id) ON DELETE CASCADE
+);
+
+
+CREATE TABLE IF NOT EXISTS NoteItem (
+    id TEXT NOT NULL PRIMARY KEY,
+    noteId TEXT NOT NULL,
+    content TEXT NOT NULL,
+    lastModified INTEGER NOT NULL,
+    isChecked INTEGER AS kotlin.Boolean NOT NULL DEFAULT 0,  -- 0 = false, 1 = true (auto-converted to Boolean)
+    indents INTEGER NOT NULL DEFAULT 0,         -- Number of indents for hierarchical items
+    FOREIGN KEY (noteId) REFERENCES Note(id) ON DELETE CASCADE
+);
+
+
+-- Indexes for faster queries
+CREATE INDEX IF NOT EXISTS idx_folder_lastModified ON Folder(lastModified DESC);
+CREATE INDEX IF NOT EXISTS idx_note_folderId ON Note(folderId);
+CREATE INDEX IF NOT EXISTS idx_note_lastModified ON Note(lastModified DESC);
+CREATE INDEX IF NOT EXISTS idx_NoteItem_noteId ON NoteItem(noteId);
+CREATE INDEX IF NOT EXISTS idx_NoteItem_lastModified ON NoteItem(lastModified DESC);
+
+getFolderById:
+SELECT
+    f.id,
+    f.name,
+    (SELECT COUNT(*) FROM Note n WHERE n.folderId = f.id) AS noteCount,
+    COALESCE(
+        -- Latest modification from any level (NoteItem, Note, or Folder)
+        (SELECT MAX(maxMod) FROM (
+            -- Latest from NoteItems
+            SELECT MAX(nr.lastModified) AS maxMod
+            FROM Note n
+            LEFT JOIN NoteItem nr ON n.id = nr.noteId
+            WHERE n.folderId = f.id
+
+            UNION ALL
+
+            -- Latest from Notes themselves
+            SELECT MAX(n.lastModified) AS maxMod
+            FROM Note n
+            WHERE n.folderId = f.id
+
+            UNION ALL
+
+            -- Folder's own lastModified
+            SELECT f.lastModified AS maxMod
+        )),
+        f.lastModified
+    ) AS lastModified
+FROM Folder f
+WHERE f.id = ?;
+
+addFolder:
+INSERT INTO Folder (id, name, noteCount, lastModified) VALUES (?, ?, 0, ?);
+
+updateFolder:
+UPDATE Folder
+SET name = ?, lastModified = ?
+WHERE id = ?;
+
+getFolders:
+SELECT
+    f.id,
+    f.name,
+    (SELECT COUNT(*) FROM Note n WHERE n.folderId = f.id) AS noteCount,
+    COALESCE(
+        -- Latest modification from any level (NoteItem, Note, or Folder)
+        (SELECT MAX(maxMod) FROM (
+            -- Latest from NoteItems
+            SELECT MAX(nr.lastModified) AS maxMod
+            FROM Note n
+            LEFT JOIN NoteItem nr ON n.id = nr.noteId
+            WHERE n.folderId = f.id
+
+            UNION ALL
+
+            -- Latest from Notes themselves (e.g. when name changes)
+            SELECT MAX(n.lastModified) AS maxMod
+            FROM Note n
+            WHERE n.folderId = f.id
+
+            UNION ALL
+
+            -- Folder's own lastModified (e.g. when folder name changes)
+            SELECT f.lastModified AS maxMod
+        )),
+        f.lastModified
+    ) AS lastModified
+FROM Folder f
+ORDER BY lastModified DESC;
+
+getAllNotes:
+SELECT *
+FROM Note
+ORDER BY lastModified DESC;
+
+getNotesByFolder:
+SELECT *
+FROM Note
+WHERE folderId = ?
+ORDER BY lastModified DESC;
+
+getNoteById:
+SELECT *
+FROM Note
+WHERE id = ?;
+
+addNote:
+INSERT INTO Note (id, folderId, name, lastModified) VALUES (?, ?, ?, ?);
+
+updateNote:
+UPDATE Note
+SET name = ?, lastModified = ?
+WHERE id = ?;
+
+deleteNote:
+DELETE FROM Note
+WHERE id = ?;
+
+deleteAllNotes:
+DELETE FROM Note;
+
+countNotesByFolder:
+SELECT folderId, COUNT(*) AS total
+FROM Note
+GROUP BY folderId;
+
+getLatestModifiedByFolder:
+SELECT folderId, MAX(lastModified) AS latest
+FROM Note
+GROUP BY folderId;
+
+getNoteItemsByNoteId:
+SELECT * FROM NoteItem WHERE noteId = ? ORDER BY lastModified DESC;
+
+getNoteItemById:
+SELECT * FROM NoteItem WHERE id = ?;
+
+addNoteItem:
+INSERT INTO NoteItem (id, noteId, content, lastModified, isChecked, indents)
+VALUES (?, ?, ?, ?, ?, ?);
+
+updateNoteItem:
+UPDATE NoteItem SET content = ?, lastModified = ? WHERE id = ?;
+
+deleteNoteItem:
+DELETE FROM NoteItem WHERE id = ?;
+
+deleteAllNoteItems:
+DELETE FROM NoteItem WHERE noteId = ?;
+
+countNoteItemsByNoteId:
+SELECT COUNT(*) AS total FROM NoteItem WHERE noteId = ?;

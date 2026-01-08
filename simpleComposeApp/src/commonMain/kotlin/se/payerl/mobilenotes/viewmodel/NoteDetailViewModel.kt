@@ -1,0 +1,155 @@
+package se.payerl.mobilenotes.viewmodel
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import se.payerl.mobilenotes.data.storage.MyNoteStorage
+import se.payerl.mobilenotes.db.Note
+import se.payerl.mobilenotes.db.NoteItem
+import kotlin.time.Clock
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
+
+/**
+ * UI State for the Note Detail screen.
+ */
+sealed interface NoteDetailUiState {
+    data object Loading : NoteDetailUiState
+    data class Success(val note: Note) : NoteDetailUiState
+    data class Error(val message: String) : NoteDetailUiState
+}
+
+/**
+ * ViewModel for the Note Detail screen using MyNoteStorage directly.
+ *
+ * Displays and allows editing of a single note.
+ * Simple and straightforward - fetches note from storage.
+ */
+class NoteDetailViewModel(
+    private val storage: MyNoteStorage
+) : ViewModel() {
+
+    private val _uiState = MutableStateFlow<NoteDetailUiState>(NoteDetailUiState.Loading)
+    val uiState: StateFlow<NoteDetailUiState> = _uiState.asStateFlow()
+
+    private val _items = MutableStateFlow<List<NoteItem>>(emptyList())
+    val items: StateFlow<List<NoteItem>> = _items.asStateFlow()
+
+    private var currentNoteId: String? = null
+
+    /**
+     * Load a specific note by ID.
+     * Fetches directly from storage.
+     */
+    fun loadNote(noteId: String) {
+        currentNoteId = noteId
+
+        viewModelScope.launch {
+            _uiState.value = NoteDetailUiState.Loading
+
+            try {
+                val dbNote = storage.getNote(noteId)
+
+                // Convert database model to domain model
+                val note = Note(
+                    id = dbNote.id,
+                    folderId = dbNote.folderId,
+                    name = dbNote.name,
+                    lastModified = dbNote.lastModified
+                )
+
+                _items.value = storage.getNoteItems(note.id)
+                _uiState.value = NoteDetailUiState.Success(note)
+            } catch (exception: Exception) {
+                _uiState.value = NoteDetailUiState.Error(
+                    exception.message ?: "Failed to load note"
+                )
+            }
+        }
+    }
+
+    /**
+     * Update an item's checked state.
+     */
+    fun updateItemChecked(itemId: String, isChecked: Boolean) {
+        _items.value = _items.value.map { item ->
+            if (item.id == itemId) {
+                item.copy(isChecked = isChecked)
+            } else {
+                item
+            }
+        }
+        saveChanges()
+    }
+
+    /**
+     * Update an item's text.
+     */
+    fun updateItemText(itemId: String, text: String) {
+        _items.value = _items.value.map { item ->
+            if (item.id == itemId) {
+                item.copy(content = text)
+            } else {
+                item
+            }
+        }
+        saveChanges()
+    }
+
+    /**
+     * Add a new item to the note.
+     */
+    @OptIn(ExperimentalUuidApi::class)
+    fun addItem(text: String, indentLevel: Long = 0) {
+        val newItem = NoteItem(
+            id = Uuid.random().toString(),
+            noteId = currentNoteId!!,
+            content = text,
+            isChecked = false,
+            indents = indentLevel,
+            lastModified = Clock.System.now().toEpochMilliseconds()
+        )
+        _items.value += newItem
+        saveChanges()
+    }
+
+    /**
+     * Delete an item from the note.
+     */
+    fun deleteItem(itemId: String) {
+        _items.value = _items.value.filter { it.id != itemId }
+        saveChanges()
+    }
+
+    /**
+     * Save changes to storage.
+     * TODO: Implement note content/items update in MyNoteStorage
+     */
+    private fun saveChanges() {
+        val noteId = currentNoteId ?: return
+        val currentState = _uiState.value
+
+        if (currentState !is NoteDetailUiState.Success) return
+
+        viewModelScope.launch {
+            // TODO: Implement updateNote with items/content in MyNoteStorage
+            // For now, just update name if needed
+            // val content = serializeItems(_items.value)
+            // storage.updateNote(noteId, currentState.note.name, content)
+        }
+    }
+
+    /**
+     * Serialize items back to string content format.
+     */
+    private fun serializeItems(items: List<NoteItem>): String {
+        return items.joinToString("\n") { item ->
+            val indent = "  ".repeat(item.indents.toInt())
+            val checkbox = if (item.isChecked) "[x] " else "[ ] "
+            "$indent$checkbox${item.content}"
+        }
+    }
+}

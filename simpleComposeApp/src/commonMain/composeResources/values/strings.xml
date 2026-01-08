@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MobileNotes</string>
+    <string name="back">Back</string>
+    <string name="sort">Sort</string>
+    <string name="add">Add</string>
+    <string name="more">More</string>
+    <string name="last_edited">Last edited %s</string>
+</resources>
+

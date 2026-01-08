@@ -1,6 +1,9 @@
 package se.payerl.mobilenotes.data.storage
 
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import se.payerl.mobilenotes.db.Folder
 import se.payerl.mobilenotes.db.MobileNotesDatabase
 import se.payerl.mobilenotes.db.Note
@@ -53,6 +56,23 @@ actual class MyNoteStorage {
         return database.mobileNotesQueries.getNoteById(noteId).executeAsOne()
     }
 
+    actual suspend fun getNoteFlow(noteId: String): Flow<Note> = flow {
+        while (true) {
+            emit(getNote(noteId))
+            delay(1000) // Poll every second for changes
+        }
+    }
+
+    actual fun updateNote(note: Note): Note {
+        database.mobileNotesQueries.updateNote(
+            name = note.name,
+            lastModified = note.lastModified,
+            folderId = note.folderId,
+            id = note.id
+        )
+        return getNote(note.id)
+    }
+
     actual fun addNote(folderId: String, name: String): Note {
         val noteId = UUID.randomUUID().toString()
         val now = kotlin.time.Clock.System.now().toEpochMilliseconds()
@@ -92,5 +112,23 @@ actual class MyNoteStorage {
         if(inserted.value < 1) throw Exception("Failed to insert NoteItem with id $noteItemId")
 
         return getNoteItem(noteItemId)
+    }
+
+    actual fun updateNoteItem(noteItem: NoteItem): NoteItem {
+        val now = kotlin.time.Clock.System.now().toEpochMilliseconds()
+
+        database.mobileNotesQueries.updateNoteItem(
+            content = noteItem.content,
+            isChecked = noteItem.isChecked,
+            indents = noteItem.indents,
+            lastModified = now,
+            id = noteItem.id
+        )
+
+        return getNoteItem(noteItem.id)
+    }
+
+    actual fun deleteNoteItem(noteItemId: String) {
+        database.mobileNotesQueries.deleteNoteItem(noteItemId)
     }
 }

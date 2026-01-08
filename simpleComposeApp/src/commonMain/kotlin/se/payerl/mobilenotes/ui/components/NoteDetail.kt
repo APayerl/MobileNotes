@@ -35,10 +35,10 @@ fun NoteDetail(
         is NoteDetailUiState.Loading -> {
             // Show loading state with empty ListView
             NoteDetailContent(
+                noteId = noteId,
                 title = "Loading...",
                 items = emptyList(),
-                onItemCheckedChange = { _, _ -> },
-                onItemTextChange = { _, _ -> },
+                onItemChange = { },
                 onAddItem = { },
                 onDeleteItem = { },
                 onBackClick = onBackClick,
@@ -60,14 +60,10 @@ fun NoteDetail(
             }
 
             NoteDetailContent(
+                noteId = noteId,
                 title = state.note.name,
                 items = noteItems,
-                onItemCheckedChange = { itemId, checked ->
-                    viewModel.updateItemChecked(itemId, checked)
-                },
-                onItemTextChange = { itemId, newText ->
-                    viewModel.updateItemText(itemId, newText)
-                },
+                onItemChange = viewModel::updateItem,
                 onAddItem = {
                     viewModel.addItem("New item")
                 },
@@ -82,6 +78,7 @@ fun NoteDetail(
         is NoteDetailUiState.Error -> {
             // Show error state
             NoteDetailContent(
+                noteId = "Error",
                 title = "Error",
                 items = listOf(
                     NoteItem(
@@ -93,8 +90,7 @@ fun NoteDetail(
                         lastModified = 0
                     )
                 ),
-                onItemCheckedChange = { _, _ -> },
-                onItemTextChange = { _, _ -> },
+                onItemChange = { },
                 onAddItem = { },
                 onDeleteItem = { },
                 onBackClick = onBackClick,

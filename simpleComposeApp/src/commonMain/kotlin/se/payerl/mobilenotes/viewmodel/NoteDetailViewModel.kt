@@ -9,6 +9,7 @@ import kotlinx.coroutines.launch
 import se.payerl.mobilenotes.data.storage.MyNoteStorage
 import se.payerl.mobilenotes.db.Note
 import se.payerl.mobilenotes.db.NoteItem
+import se.payerl.mobilenotes.util.AppLogger
 import kotlin.time.Clock
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
@@ -72,31 +73,21 @@ class NoteDetailViewModel(
     }
 
     /**
-     * Update an item's checked state.
+     * Update an item.
      */
-    fun updateItemChecked(itemId: String, isChecked: Boolean) {
-        _items.value = _items.value.map { item ->
-            if (item.id == itemId) {
-                item.copy(isChecked = isChecked)
-            } else {
-                item
+    fun updateItem(noteItem: NoteItem) {
+        viewModelScope.launch {
+            try {
+                val updatedItem = noteItem.copy(lastModified = Clock.System.now().toEpochMilliseconds())
+                storage.updateNoteItem(updatedItem)
+                _items.value = _items.value.map { item ->
+                    if (item.id == noteItem.id) updatedItem else item
+                }
+            } catch (exception: Exception) {
+                // Handle error
+                AppLogger.error("error", "Failed to update item: ${exception.message}")
             }
         }
-        saveChanges()
-    }
-
-    /**
-     * Update an item's text.
-     */
-    fun updateItemText(itemId: String, text: String) {
-        _items.value = _items.value.map { item ->
-            if (item.id == itemId) {
-                item.copy(content = text)
-            } else {
-                item
-            }
-        }
-        saveChanges()
     }
 
     /**
@@ -104,52 +95,37 @@ class NoteDetailViewModel(
      */
     @OptIn(ExperimentalUuidApi::class)
     fun addItem(text: String, indentLevel: Long = 0) {
-        val newItem = NoteItem(
-            id = Uuid.random().toString(),
-            noteId = currentNoteId!!,
-            content = text,
-            isChecked = false,
-            indents = indentLevel,
-            lastModified = Clock.System.now().toEpochMilliseconds()
-        )
-        _items.value += newItem
-        saveChanges()
+        viewModelScope.launch {
+            try {
+                val newItem = NoteItem(
+                    id = Uuid.random().toString(),
+                    noteId = currentNoteId!!,
+                    content = text,
+                    isChecked = false,
+                    indents = indentLevel,
+                    lastModified = Clock.System.now().toEpochMilliseconds()
+                )
+                val savedItem = storage.addNoteItem(newItem)
+                _items.value += savedItem
+            } catch (exception: Exception) {
+                // Handle error
+                println("Failed to add item: ${exception.message}")
+            }
+        }
     }
 
     /**
      * Delete an item from the note.
      */
     fun deleteItem(itemId: String) {
-        _items.value = _items.value.filter { it.id != itemId }
-        saveChanges()
-    }
-
-    /**
-     * Save changes to storage.
-     * TODO: Implement note content/items update in MyNoteStorage
-     */
-    private fun saveChanges() {
-        val noteId = currentNoteId ?: return
-        val currentState = _uiState.value
-
-        if (currentState !is NoteDetailUiState.Success) return
-
         viewModelScope.launch {
-            // TODO: Implement updateNote with items/content in MyNoteStorage
-            // For now, just update name if needed
-            // val content = serializeItems(_items.value)
-            // storage.updateNote(noteId, currentState.note.name, content)
-        }
-    }
-
-    /**
-     * Serialize items back to string content format.
-     */
-    private fun serializeItems(items: List<NoteItem>): String {
-        return items.joinToString("\n") { item ->
-            val indent = "  ".repeat(item.indents.toInt())
-            val checkbox = if (item.isChecked) "[x] " else "[ ] "
-            "$indent$checkbox${item.content}"
+            try {
+                storage.deleteNoteItem(itemId)
+                _items.value = _items.value.filter { it.id != itemId }
+            } catch (exception: Exception) {
+                // Handle error
+                println("Failed to delete item: ${exception.message}")
+            }
         }
     }
 }

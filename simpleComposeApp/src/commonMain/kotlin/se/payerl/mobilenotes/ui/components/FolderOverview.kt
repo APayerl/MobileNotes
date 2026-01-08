@@ -6,10 +6,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -101,7 +104,6 @@ fun FolderOverviewContent(
     onCreateFolder: () -> Unit,
     onRefresh: () -> Unit
 ) {
-
     Column(modifier = Modifier
         .background(MaterialTheme.colorScheme.primary)) {
         TopAppBar(
@@ -207,7 +209,7 @@ fun FolderOverviewContent(
                         FolderRow(
                             folder = folders[index],
                             onClick = { onFolderClick(folders[index].id) },
-                            modifier = Modifier.height(40.dp)
+                            modifier = Modifier.height(60.dp)
                         )
                     }
                 }
@@ -222,6 +224,7 @@ fun FolderRow(folder: Folder, onClick: () -> Unit, modifier: Modifier = Modifier
         modifier = modifier
             .padding(4.dp, 0.dp)
             .fillMaxWidth()
+            .fillMaxHeight()
             .clickable(onClick = onClick)  // Make the entire row clickable!
     ) {
         Row(
@@ -229,21 +232,27 @@ fun FolderRow(folder: Folder, onClick: () -> Unit, modifier: Modifier = Modifier
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             modifier = Modifier
                 .padding(4.dp, 4.dp)
+                .weight(1F)
                 .fillMaxWidth()) {
             Icon(
                 imageVector = Icons.Default.FolderOpen,
                 contentDescription = "Folder to select",
-                tint = MaterialTheme.colorScheme.onPrimary)
+                tint = MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier
+                    .padding(2.dp)
+                    .fillMaxHeight()
+                    .aspectRatio(1f))
             Text(
                 text = folder.name,
                 color = MaterialTheme.colorScheme.onPrimary,
                 modifier = Modifier
-                    .weight(1F, true)
-                    .fillMaxWidth())
+                    .weight(1f))
             Text(
                 text = folder.noteCount.toString(),
                 color = MaterialTheme.colorScheme.onPrimary,
-                modifier = Modifier.padding(2.dp, 0.dp))
+                modifier = Modifier
+                    .padding(2.dp, 0.dp)
+                    .wrapContentSize())
         }
         Row(modifier = Modifier
             .height(1.dp)

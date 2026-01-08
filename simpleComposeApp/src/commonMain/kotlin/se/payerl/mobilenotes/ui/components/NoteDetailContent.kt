@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import se.payerl.mobilenotes.data.storage.MyNoteStorage
 import se.payerl.mobilenotes.db.NoteItem
+import kotlin.time.Clock
 
 /**
  * Visningsläge för ListView
@@ -37,11 +38,11 @@ enum class ListViewMode {
 
 @Composable
 fun NoteDetailContent(
+    noteId: String,
     title: String,
     items: List<NoteItem>,
     storage: MyNoteStorage,
-    onItemCheckedChange: (String, Boolean) -> Unit,
-    onItemTextChange: (String, String) -> Unit,
+    onItemChange: (NoteItem) -> Unit,
     onAddItem: () -> Unit,
     onDeleteItem: (String) -> Unit,
     onBackClick: () -> Unit,
@@ -49,6 +50,7 @@ fun NoteDetailContent(
     lastEdited: String = "Last edited ----"
 ) {
     var viewMode by remember { mutableStateOf(ListViewMode.CHECKLIST) }
+    val titleFieldState = rememberTextFieldState(title)
 
     Column(
         modifier = modifier
@@ -56,7 +58,7 @@ fun NoteDetailContent(
             .background(Color.White)
     ) {
         TopBar(
-            title,
+            title = titleFieldState.text.toString(),
             navBack = onBackClick,
             sort = {},
             addItem = onAddItem,
@@ -79,13 +81,25 @@ fun NoteDetailContent(
             Spacer(modifier = Modifier.height(8.dp))
 
             // Titel
-            Text(
-                text = title,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.Black,
+            BasicTextField(
+                state = titleFieldState,
+                textStyle = TextStyle(
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.Black
+                ),
                 modifier = Modifier.padding(horizontal = 16.dp)
             )
+            LaunchedEffect(titleFieldState.text.toString()) {
+                if (titleFieldState.text.toString() != title) {
+                    val oldNote = storage.getNote(noteId)
+                    val newNote = oldNote.copy(
+                        name = titleFieldState.text.toString(),
+                        lastModified = Clock.System.now().toEpochMilliseconds()
+                    )
+                    storage.updateNote(newNote)
+                }
+            }
 
             Spacer(modifier = Modifier.height(6.dp))
 
@@ -103,11 +117,8 @@ fun NoteDetailContent(
                 items(items.size) { index ->
                     NoteDetailContentRow(
                         item = items[index],
-                        onCheckedChange = { checked ->
-                            onItemCheckedChange(items[index].id, checked)
-                        },
-                        onTextChange = { newText ->
-                            onItemTextChange(items[index].id, newText)
+                        onChange = { noteItem ->
+                            onItemChange(noteItem)
                         },
                         onDelete = {
                             onDeleteItem(items[index].id)
@@ -320,8 +331,7 @@ fun NoteDetailContentRow(
     item: NoteItem,
     storage: MyNoteStorage,
     backColor: Color = Color(0xFFE8F5E9),
-    onCheckedChange: (Boolean) -> Unit,
-    onTextChange: (String) -> Unit,
+    onChange: (NoteItem) -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -341,7 +351,9 @@ fun NoteDetailContentRow(
         // Checkbox
         CheckboxView(
             checked = item.isChecked,
-            onItemCheckedChange = onCheckedChange,
+            onItemCheckedChange = { checked ->
+                onChange(item.copy(isChecked = checked))
+            },
             modifier = Modifier.fillMaxHeight(),
             backColor = backColor
         )
@@ -371,7 +383,7 @@ fun NoteDetailContentRow(
                 if (textFieldState.text.toString() != item.content) {
                     //Get instance of MyNoteStorage from corect platform
                     storage.addNote(item.id, textFieldState.text.toString())
-                    onTextChange(textFieldState.text.toString())
+                    onChange(item.copy(content = textFieldState.text.toString()))
                 }
             }
         }

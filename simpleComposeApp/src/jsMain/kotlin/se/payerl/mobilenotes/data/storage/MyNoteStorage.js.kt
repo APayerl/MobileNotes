@@ -1,12 +1,15 @@
 package se.payerl.mobilenotes.data.storage
 
 import app.cash.sqldelight.driver.worker.WebWorkerDriver
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import org.w3c.dom.Worker
-import se.payerl.mobilenotes.data.adapters.BooleanColumnAdapter
 import se.payerl.mobilenotes.db.Folder
 import se.payerl.mobilenotes.db.MobileNotesDatabase
 import se.payerl.mobilenotes.db.Note
 import se.payerl.mobilenotes.db.NoteItem
+import kotlin.time.Clock
 
 /**
  * JS/Browser implementation of MyNoteStorage using SQLDelight with WebWorkerDriver.
@@ -23,31 +26,34 @@ actual class MyNoteStorage {
         // Create WebWorkerDriver for persistent storage via IndexedDB
         val driver = WebWorkerDriver(worker)
         MobileNotesDatabase.Schema.create(driver)
-        database = MobileNotesDatabase(
-            driver = driver,
-            NoteItemAdapter = NoteItem.Adapter(
-                isCheckedAdapter = BooleanColumnAdapter
-            )
-        )
+        database = MobileNotesDatabase(driver = driver)
     }
 
     actual fun getFolders(): List<Folder> {
-        return database.mobileNotesQueries.getFolders().executeAsList().map { result ->
+        return database.mobileNotesQueries.getFolders { id, name, noteCount, lastModified ->
             Folder(
-                id = result.id,
-                name = result.name,
-                lastModified = result.lastModified
+                id = id,
+                name = name,
+                lastModified = lastModified,
+                noteCount = noteCount
             )
-        }
+        }.executeAsList()
     }
 
     actual fun getFolder(folderId: String): Folder {
-        return database.mobileNotesQueries.getFolderById(folderId).executeAsOne()
+        return database.mobileNotesQueries.getFolderById(folderId) {
+            id, name, noteCount, lastModified ->
+            Folder(
+                id = id,
+                name = name,
+                lastModified = lastModified,
+                noteCount = noteCount)
+        }.executeAsOne()
     }
 
     actual fun addFolder(name: String): Folder {
         val folderId = generateUuid()
-        val now = kotlin.time.Clock.System.now().toEpochMilliseconds()
+        val now = Clock.System.now().toEpochMilliseconds()
 
         database.mobileNotesQueries.addFolder(
             id = folderId,
@@ -66,9 +72,26 @@ actual class MyNoteStorage {
         return database.mobileNotesQueries.getNoteById(noteId).executeAsOne()
     }
 
+    actual suspend fun getNoteFlow(noteId: String): Flow<Note> = flow {
+        while (true) {
+            emit(getNote(noteId))
+            delay(1000) // Poll every second for changes
+        }
+    }
+
+    actual fun updateNote(note: Note): Note {
+        database.mobileNotesQueries.updateNote(
+            name = note.name,
+            lastModified = note.lastModified,
+            folderId = note.folderId,
+            id = note.id
+        )
+        return getNote(note.id)
+    }
+
     actual fun addNote(folderId: String, name: String): Note {
         val noteId = generateUuid()
-        val now = kotlin.time.Clock.System.now().toEpochMilliseconds()
+        val now = Clock.System.now().toEpochMilliseconds()
 
         val inserted = database.mobileNotesQueries.addNote(
             id = noteId,
@@ -101,6 +124,24 @@ actual class MyNoteStorage {
         )
         if(inserted.value < 1) throw Exception("Failed to insert NoteItem with id $noteItemId")
         return getNoteItem(noteItemId)
+    }
+
+    actual fun updateNoteItem(noteItem: NoteItem): NoteItem {
+        val now = Clock.System.now().toEpochMilliseconds()
+
+        database.mobileNotesQueries.updateNoteItem(
+            content = noteItem.content,
+            isChecked = noteItem.isChecked,
+            indents = noteItem.indents,
+            lastModified = now,
+            id = noteItem.id
+        )
+
+        return getNoteItem(noteItem.id)
+    }
+
+    actual fun deleteNoteItem(noteItemId: String) {
+        database.mobileNotesQueries.deleteNoteItem(noteItemId)
     }
 }
 

@@ -47,22 +47,11 @@ fun NoteDetail(
             )
         }
         is NoteDetailUiState.Success -> {
-            // Convert domain NoteItems to ListView ListItems
-            val noteItems = items.map { noteItem ->
-                NoteItem(
-                    id = noteItem.id,
-                    noteId = noteItem.noteId,
-                    content = noteItem.content,
-                    isChecked = noteItem.isChecked,
-                    indents = noteItem.indents,
-                    lastModified = noteItem.lastModified
-                )
-            }
-
+            // Items are already NoteItems from the database, just use them directly
             NoteDetailContent(
                 noteId = noteId,
                 title = state.note.name,
-                items = noteItems,
+                items = items,
                 onItemChange = viewModel::updateItem,
                 onAddItem = {
                     viewModel.addItem("New item")
@@ -87,7 +76,8 @@ fun NoteDetail(
                         content = state.message,
                         isChecked = false,
                         indents = 0,
-                        lastModified = 0
+                        lastModified = 0,
+                        position = 0
                     )
                 ),
                 onItemChange = { },

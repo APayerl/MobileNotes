@@ -25,7 +25,9 @@ CREATE TABLE IF NOT EXISTS NoteItem (
     lastModified INTEGER NOT NULL,
     isChecked INTEGER AS kotlin.Boolean NOT NULL DEFAULT 0,  -- 0 = false, 1 = true (auto-converted to Boolean)
     indents INTEGER NOT NULL DEFAULT 0,         -- Number of indents for hierarchical items
-    FOREIGN KEY (noteId) REFERENCES Note(id) ON DELETE CASCADE
+    position INTEGER NOT NULL DEFAULT 0,        -- Position in list for ordering (gap = 1,000,000)
+    FOREIGN KEY (noteId) REFERENCES Note(id) ON DELETE CASCADE,
+    UNIQUE(noteId, position)  -- Ensures no duplicate positions per note
 );
 
 
@@ -33,8 +35,7 @@ CREATE TABLE IF NOT EXISTS NoteItem (
 CREATE INDEX IF NOT EXISTS idx_folder_lastModified ON Folder(lastModified DESC);
 CREATE INDEX IF NOT EXISTS idx_note_folderId ON Note(folderId);
 CREATE INDEX IF NOT EXISTS idx_note_lastModified ON Note(lastModified DESC);
-CREATE INDEX IF NOT EXISTS idx_NoteItem_noteId ON NoteItem(noteId);
-CREATE INDEX IF NOT EXISTS idx_NoteItem_lastModified ON NoteItem(lastModified DESC);
+CREATE INDEX IF NOT EXISTS idx_NoteItem_noteId_position ON NoteItem(noteId, position ASC);  -- Composite index for filtering by noteId and ordering by position
 
 getFolderById:
 SELECT
@@ -148,17 +149,17 @@ FROM Note
 GROUP BY folderId;
 
 getNoteItemsByNoteId:
-SELECT * FROM NoteItem WHERE noteId = ? ORDER BY lastModified DESC;
+SELECT * FROM NoteItem WHERE noteId = ? ORDER BY position ASC;
 
 getNoteItemById:
 SELECT * FROM NoteItem WHERE id = ?;
 
 addNoteItem:
-INSERT INTO NoteItem (id, noteId, content, lastModified, isChecked, indents)
-VALUES (?, ?, ?, ?, ?, ?);
+INSERT INTO NoteItem (id, noteId, content, lastModified, isChecked, indents, position)
+VALUES (?, ?, ?, ?, ?, ?, ?);
 
 updateNoteItem:
-UPDATE NoteItem SET content = ?, isChecked = ?, indents = ?, lastModified = ? WHERE id = ?;
+UPDATE NoteItem SET content = ?, isChecked = ?, indents = ?, position = ?, lastModified = ? WHERE id = ?;
 
 deleteNoteItem:
 DELETE FROM NoteItem WHERE id = ?;

@@ -106,7 +106,8 @@ actual class MyNoteStorage {
             content = noteItem.content,
             lastModified = noteItem.lastModified,
             isChecked = noteItem.isChecked,
-            indents = noteItem.indents
+            indents = noteItem.indents,
+            position = noteItem.position
         )
 
         if(inserted.value < 1) throw Exception("Failed to insert NoteItem with id $noteItemId")
@@ -121,6 +122,7 @@ actual class MyNoteStorage {
             content = noteItem.content,
             isChecked = noteItem.isChecked,
             indents = noteItem.indents,
+            position = noteItem.position,
             lastModified = now,
             id = noteItem.id
         )

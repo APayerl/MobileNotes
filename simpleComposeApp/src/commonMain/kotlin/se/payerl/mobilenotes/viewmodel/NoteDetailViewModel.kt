@@ -10,6 +10,7 @@ import se.payerl.mobilenotes.data.storage.MyNoteStorage
 import se.payerl.mobilenotes.db.Note
 import se.payerl.mobilenotes.db.NoteItem
 import se.payerl.mobilenotes.util.AppLogger
+import se.payerl.mobilenotes.util.PositionManager
 import kotlin.time.Clock
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
@@ -32,6 +33,10 @@ sealed interface NoteDetailUiState {
 class NoteDetailViewModel(
     private val storage: MyNoteStorage
 ) : ViewModel() {
+
+    companion object {
+        private const val POSITION_GAP = 1_000_000L  // Gap between positions for lazy normalization
+    }
 
     private val _uiState = MutableStateFlow<NoteDetailUiState>(NoteDetailUiState.Loading)
     val uiState: StateFlow<NoteDetailUiState> = _uiState.asStateFlow()
@@ -97,13 +102,18 @@ class NoteDetailViewModel(
     fun addItem(text: String, indentLevel: Long = 0) {
         viewModelScope.launch {
             try {
+                val currentItems = _items.value
+                val maxPosition = currentItems.maxOfOrNull { it.position }
+                val newPosition = PositionManager.calculatePositionForNewItem(maxPosition)
+
                 val newItem = NoteItem(
                     id = Uuid.random().toString(),
                     noteId = currentNoteId!!,
                     content = text,
                     isChecked = false,
                     indents = indentLevel,
-                    lastModified = Clock.System.now().toEpochMilliseconds()
+                    lastModified = Clock.System.now().toEpochMilliseconds(),
+                    position = newPosition
                 )
                 val savedItem = storage.addNoteItem(newItem)
                 _items.value += savedItem

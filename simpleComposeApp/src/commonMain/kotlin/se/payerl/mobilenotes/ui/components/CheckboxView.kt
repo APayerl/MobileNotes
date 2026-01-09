@@ -22,11 +22,10 @@ fun CheckboxView(
     onItemCheckedChange: (Boolean) -> Unit,
     frontColor: Color = Color(0xFF27AD2D),
     backColor: Color = Color(0xFF9FC7A3),
-    modifier: Modifier
+    modifier: Modifier = Modifier
 ) {
     Column(
         modifier = modifier
-            .aspectRatio(1.0f)
             .fillMaxHeight()
             .background(backColor),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -35,12 +34,14 @@ fun CheckboxView(
         IconButton(
             onClick = { onItemCheckedChange(!checked) }
         ) {
-            if(checked) Icon(
-                imageVector = Icons.Default.Check,
-                contentDescription = "Checkbox is $checked",
-                tint = frontColor,
-                modifier = modifier
-                    .aspectRatio(1.0f))
+            if (checked) {
+                Icon(
+                    imageVector = Icons.Default.Check,
+                    contentDescription = "Checked",
+                    tint = frontColor,
+                    modifier = Modifier.aspectRatio(1.0f)
+                )
+            }
         }
     }
 }
@@ -53,9 +54,9 @@ fun CheckboxViewPreview() {
         .width(40.dp)) {
         CheckboxView(
             checked = true,
-            onItemCheckedChange = { _ -> },
+            onItemCheckedChange = { _ -> }/*,
             modifier = Modifier
-                .height(20.dp)
+                .height(20.dp)*/
         )
     }
 }

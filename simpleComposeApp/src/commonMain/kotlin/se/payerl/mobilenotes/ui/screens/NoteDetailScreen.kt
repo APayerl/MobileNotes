@@ -6,7 +6,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -227,64 +226,79 @@ private fun NoteDetailContent(
                     count = items.size,
                     key = { index -> items[index].id }
                 ) { index ->
-                    // Show ghost/shadow of dragged item at drop target position
-                    if (dragTargetIndex == index && draggedItemIndex != null && draggedItemIndex != index) {
-                        val draggedItem = items[draggedItemIndex!!]
-                        NoteDetailContentRow(
-                            item = draggedItem,
-                            itemIndex = -1,
-                            isDragging = false,
-                            isDropTarget = false,
-                            onDragStart = { },
-                            onDrag = { },
-                            onDragEnd = { },
-                            onChange = { },
-                            onDelete = { },
-                            storage = storage,
-                            modifier = Modifier
-                                .height(40.dp)
-                                .alpha(0.6f)
-                                .border(2.dp, Color(0xFF4CAF50), RoundedCornerShape(4.dp))
-                        )
-                    }
-
-                    NoteDetailContentRow(
-                        item = items[index],
-                        itemIndex = index,
-                        isDragging = draggedItemIndex == index,
-                        isDropTarget = false,
-                        onDragStart = {
-                            draggedItemIndex = it
-                            draggedFromIndex = it
-                            cumulativeDragOffset = 0f
-                        },
-                        onDrag = { offset ->
-                            cumulativeDragOffset += offset
-                        },
-                        onDragEnd = {
-                            val fromIndex = draggedFromIndex
-                            val toIndex = dragTargetIndex
-
-                            draggedItemIndex = null
-                            dragTargetIndex = null
-                            draggedFromIndex = null
-                            cumulativeDragOffset = 0f
-
-                            if (fromIndex != null && toIndex != null && fromIndex != toIndex) {
-                                onMoveItem(fromIndex, toIndex)
+                    when (viewMode) {
+                        ListViewMode.CHECKLIST -> {
+                            // Show ghost/shadow of dragged item at drop target position
+                            if (dragTargetIndex == index && draggedItemIndex != null && draggedItemIndex != index) {
+                                val draggedItem = items[draggedItemIndex!!]
+                                NoteDetailContentRow(
+                                    item = draggedItem,
+                                    itemIndex = -1,
+                                    isDragging = false,
+                                    isDropTarget = false,
+                                    onDragStart = { },
+                                    onDrag = { },
+                                    onDragEnd = { },
+                                    onChange = { },
+                                    onDelete = { },
+                                    storage = storage,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .alpha(0.6f)
+                                        .border(2.dp, Color(0xFF4CAF50), RoundedCornerShape(4.dp))
+                                )
                             }
-                        },
-                        onChange = { noteItem ->
-                            onItemChange(noteItem)
-                        },
-                        onDelete = {
-                            onDeleteItem(items[index].id)
-                        },
-                        storage = storage,
-                        modifier = Modifier
-                            .height(40.dp)
-                            .alpha(if (draggedItemIndex == index) 0.3f else 1f)
-                    )
+
+                            NoteDetailContentRow(
+                                item = items[index],
+                                itemIndex = index,
+                                isDragging = draggedItemIndex == index,
+                                isDropTarget = false,
+                                onDragStart = {
+                                    draggedItemIndex = it
+                                    draggedFromIndex = it
+                                    cumulativeDragOffset = 0f
+                                },
+                                onDrag = { offset ->
+                                    cumulativeDragOffset += offset
+                                },
+                                onDragEnd = {
+                                    val fromIndex = draggedFromIndex
+                                    val toIndex = dragTargetIndex
+
+                                    draggedItemIndex = null
+                                    dragTargetIndex = null
+                                    draggedFromIndex = null
+                                    cumulativeDragOffset = 0f
+
+                                    if (fromIndex != null && toIndex != null && fromIndex != toIndex) {
+                                        onMoveItem(fromIndex, toIndex)
+                                    }
+                                },
+                                onChange = { noteItem ->
+                                    onItemChange(noteItem)
+                                },
+                                onDelete = {
+                                    onDeleteItem(items[index].id)
+                                },
+                                storage = storage,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .alpha(if (draggedItemIndex == index) 0.3f else 1f)
+                            )
+                        }
+                        ListViewMode.PLAIN_TEXT -> {
+                            PlainTextRow(
+                                item = items[index],
+                                onChange = { noteItem ->
+                                    onItemChange(noteItem)
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
                 }
 
                 item {
@@ -303,6 +317,38 @@ private fun NoteDetailContent(
                     .fillMaxWidth()
                     .height(52.dp)
             )
+        }
+    }
+}
+
+/**
+ * Plain text row - shows only the text content without checkbox or indentation.
+ * Used in PLAIN_TEXT view mode. Preserves checked/indentation status in database
+ * but doesn't display or allow editing of those properties.
+ */
+@Composable
+private fun PlainTextRow(
+    item: NoteItem,
+    onChange: (NoteItem) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val textFieldState = rememberTextFieldState(item.content)
+
+    BasicTextField(
+        state = textFieldState,
+        textStyle = TextStyle(
+            fontSize = 14.sp,
+            color = Color.Black,
+            lineHeight = 20.sp
+        ),
+        modifier = modifier,
+        lineLimits = TextFieldLineLimits.MultiLine()
+    )
+
+    LaunchedEffect(textFieldState.text.toString()) {
+        if (textFieldState.text.toString() != item.content) {
+            // Only update content, preserve checked and indents status
+            onChange(item.copy(content = textFieldState.text.toString()))
         }
     }
 }
@@ -493,7 +539,7 @@ private fun NoteDetailContentRow(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .fillMaxHeight()
+            .height(IntrinsicSize.Max)
             .background(
                 color = when {
                     isDragging -> Color(0xFFBBDEFB)
@@ -546,22 +592,24 @@ private fun NoteDetailContentRow(
             },
         verticalAlignment = Alignment.CenterVertically
     ) {
+        val checkboxWidth = 40.dp
         // Spacers for indentation
         repeat(item.indents.toInt()) {
             Spacer(
                 modifier = Modifier
-                    .aspectRatio(1.0f)
-                    .fillMaxHeight()
+                    .width(checkboxWidth)
             )
         }
 
-        // Checkbox
+        // Checkbox - will expand to match row height
         CheckboxView(
             checked = item.isChecked,
             onItemCheckedChange = { checked ->
                 onChange(item.copy(isChecked = checked))
             },
-            modifier = Modifier.fillMaxHeight(),
+            modifier = Modifier
+                .width(checkboxWidth)
+                .align(Alignment.CenterVertically),
             backColor = backColor
         )
 
@@ -569,7 +617,7 @@ private fun NoteDetailContentRow(
         Box(
             modifier = Modifier
                 .weight(1f)
-                .fillMaxHeight()
+                .wrapContentHeight()
                 .padding(start = 8.dp),
             contentAlignment = Alignment.CenterStart
         ) {
@@ -583,7 +631,7 @@ private fun NoteDetailContentRow(
                     textDecoration = if (item.isChecked) TextDecoration.LineThrough else TextDecoration.None
                 ),
                 modifier = Modifier.fillMaxWidth(),
-                lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 5)
+                lineLimits = TextFieldLineLimits.MultiLine()
             )
 
             LaunchedEffect(textFieldState.text.toString()) {
@@ -594,4 +642,3 @@ private fun NoteDetailContentRow(
         }
     }
 }
-
